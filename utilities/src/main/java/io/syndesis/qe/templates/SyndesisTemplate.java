@@ -1,21 +1,22 @@
 package io.syndesis.qe.templates;
 
+import org.apache.commons.codec.binary.Base64;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeoutException;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import io.fabric8.kubernetes.api.model.KubernetesList;
-import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.openshift.api.model.Template;
 import io.syndesis.qe.TestConfiguration;
 import io.syndesis.qe.utils.OpenShiftUtils;
-import io.syndesis.qe.wait.OpenShiftWaitUtils;
+import io.syndesis.qe.utils.TestUtils;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -23,7 +24,6 @@ public class SyndesisTemplate {
 
 	private static final String SUPPORT_SA_URL = "https://raw.githubusercontent.com/syndesisio/syndesis-openshift-templates/master/support/serviceaccount-as-oauthclient-restricted.yml";
 	private static final String TEMPLATE_URL = "https://raw.githubusercontent.com/syndesisio/syndesis-openshift-templates/master/syndesis-restricted.yml";
-
 
 	public static Template getTemplate() {
 		try (InputStream is = new URL(TEMPLATE_URL).openStream()) {
@@ -41,16 +41,24 @@ public class SyndesisTemplate {
 		}
 	}
 
-
 	public static void deploy() {
 		OpenShiftUtils.getInstance().cleanProject();
 
 		// get & create restricted SA
-		OpenShiftUtils.getInstance().withDefaultUser(client -> client.serviceAccounts().createOrReplace(getSupportSA()));
-		OpenShiftUtils.getInstance().getServiceAccounts().stream().forEach(sa -> log.info(sa.getMetadata().getName()));
-		// get token from SA `oc secrets get-token`
+		ServiceAccount serviceAccount1 = OpenShiftUtils.getInstance().withDefaultUser(client -> client.serviceAccounts().createOrReplace(getSupportSA()));
+		// get token from SA `oc secrets get-token` && wait until created to prevent 404
+		TestUtils.waitForEvent(Optional::isPresent,
+				() -> OpenShiftUtils.getInstance().getSecrets().stream().filter(s -> s.getMetadata().getName().startsWith("syndesis-oauth-client-token")).findFirst(),
+				TimeUnit.MINUTES,
+				2,
+				TimeUnit.SECONDS,
+				5);
+
 		Secret secret = OpenShiftUtils.getInstance().getSecrets().stream().filter(s -> s.getMetadata().getName().startsWith("syndesis-oauth-client-token")).findFirst().get();
-		String oauthToken = secret.getData().get("token");
+		// token is Base64 encoded by default
+		String oauthTokenEncoded = secret.getData().get("token");
+		byte[] oauthTokenBytes = Base64.decodeBase64(oauthTokenEncoded);
+		String oauthToken = new String(oauthTokenBytes);
 
 		// get the template
 		Template template = getTemplate();
@@ -64,12 +72,5 @@ public class SyndesisTemplate {
 		// process & create
 		KubernetesList processedTemplate = OpenShiftUtils.getInstance().processTemplate(template, templateParams);
 		OpenShiftUtils.getInstance().createResources(processedTemplate);
-
-		try {
-			OpenShiftWaitUtils.waitFor(OpenShiftWaitUtils.isAPodReady("component", "syndesis-rest"));
-		} catch (InterruptedException | TimeoutException e) {
-			log.debug("Wait for syndesis-rest failed ", e);
-		}
 	}
-
 }

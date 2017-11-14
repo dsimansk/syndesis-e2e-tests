@@ -14,9 +14,5 @@ import io.syndesis.qe.templates.SyndesisTemplate;
 public class RestTestSuite {
 
 
-	@BeforeClass
-	public static void prepareEnvironment() {
-		SyndesisTemplate.deploy();
-	}
 
 }
