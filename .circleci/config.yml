@@ -125,7 +125,7 @@ jobs:
       - run:
           name: Checkout Syndesis
           command: |
-            git clone git@github.com:syndesisio/syndesis.git
+            git clone https://github.com/syndesisio/syndesis.git
       - run:
           name: Build Rest
           command: |
@@ -141,6 +141,23 @@ jobs:
             find . -type f -regex "\./.+/target/checkstyle-result.xml" -exec bash -c "cp {} ./checkstyle/\`echo {} | sed -e 's#^\./##' | sed -e 's#/#-#g'\`" \;
       - store_artifacts:
           path: ./checkstyle
+      - run:
+          name: Execute Test from Tag
+          command: |
+            ./run-tests.sh
+      - run:
+          name: Store Cucumber report
+          when: always
+          command: |
+            mkdir -p ~/cucumber
+            cp -f rest-tests/target/cucumber/cucumber-junit.xml ~/cucumber/rest-junit.xml
+            cp -f ui-tests/target/cucumber/cucumber-junit.xml ~/cucumber/ui-junit.xml
+      - store_test_results:
+          path: ~/cucumber
+      - store_artifacts:
+          path: rest-tests/target/cucumber
+      - store_artifacts:
+          path: ui-tests/target/cucumber
       - <<: *save_m2
       - save_cache:
           key: syndesis-qe-mvn-{{ checksum "pom.xml" }}
